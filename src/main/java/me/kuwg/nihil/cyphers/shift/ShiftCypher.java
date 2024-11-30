@@ -1,51 +1,42 @@
-package me.kuwg.nihil.cypher;
+package me.kuwg.nihil.cyphers.shift;
+
+import me.kuwg.nihil.cypher.NihilCypher;
+import me.kuwg.nihil.cypher.NihilKey;
 
 import java.nio.ByteBuffer;
-import java.util.ArrayList;
-import java.util.List;
 
 public class ShiftCypher extends NihilCypher {
-
     public ShiftCypher(final NihilKey key) {
         super(key);
     }
 
     @Override
     public byte[] encrypt(final byte[] bytes) {
-        byte[] keyBytes = key.getBytes();
-        byte[] encrypted = new byte[bytes.length];
-        List<String> logs = new ArrayList<>();
+        final byte[] keyBytes = key.getBytes();
+        final byte[] encrypted = new byte[bytes.length];
 
         for (int i = 0; i < bytes.length; i++) {
-            int shift = keyBytes[i % keyBytes.length]; // Cyclic use of the key
-            int shifted = (bytes[i] + shift) & 0xFF; // Byte overflow handling
+            final int shift = keyBytes[i % keyBytes.length];
+            final int shifted = (bytes[i] + shift) & 0xFF;
             encrypted[i] = (byte) shifted;
-
-            logs.add("Byte: " + bytes[i] + ", Shift: " + shift + ", Result: " + shifted);
         }
 
-        logs.forEach(System.out::println);
         return encrypted;
     }
 
     @Override
     public <T> T decrypt(final byte[] encryptedData, final Class<T> type) {
-        byte[] keyBytes = key.getBytes();
-        byte[] decrypted = new byte[encryptedData.length];
-        List<String> logs = new ArrayList<>();
+        final byte[] keyBytes = key.getBytes();
+        final byte[] decrypted = new byte[encryptedData.length];
 
         for (int i = 0; i < encryptedData.length; i++) {
-            int shift = keyBytes[i % keyBytes.length];
-            int shiftedBack = (encryptedData[i] - shift) & 0xFF; // Byte overflow handling
+            final int shift = keyBytes[i % keyBytes.length];
+            final int shiftedBack = (encryptedData[i] - shift) & 0xFF;
             decrypted[i] = (byte) shiftedBack;
 
-            logs.add("Encrypted Byte: " + encryptedData[i] + ", Shift: " + shift + ", Result: " + shiftedBack);
         }
 
-        logs.forEach(System.out::println);
-
-        // Convert back to the original data type
-        ByteBuffer buffer = ByteBuffer.wrap(decrypted);
+        final ByteBuffer buffer = ByteBuffer.wrap(decrypted);
         if (type == Integer.class) {
             return type.cast(buffer.getInt());
         } else if (type == Double.class) {
@@ -60,7 +51,9 @@ public class ShiftCypher extends NihilCypher {
             return type.cast(buffer.getFloat());
         } else if (type == String.class) {
             return type.cast(new String(decrypted));
-        } else {
+        } else if (type == byte[].class) {
+            return (T) decrypted;
+        }  else {
             throw new IllegalArgumentException("Unsupported type for decryption: " + type.getName());
         }
     }

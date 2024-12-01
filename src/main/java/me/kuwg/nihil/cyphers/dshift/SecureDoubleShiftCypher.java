@@ -4,7 +4,9 @@ import me.kuwg.nihil.cypher.NihilCypher;
 import me.kuwg.nihil.cypher.NihilKey;
 
 import java.nio.ByteBuffer;
+import java.security.InvalidKeyException;
 import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
 import java.util.Arrays;
 import javax.crypto.Mac;
@@ -13,6 +15,8 @@ import javax.crypto.spec.SecretKeySpec;
 public class SecureDoubleShiftCypher extends NihilCypher {
     private static final int SALT_LENGTH = 16;
     private static final int HMAC_LENGTH = 32;
+
+    private static final String SHA_ALGORITHM = "SHA-256";
     private static final String HMAC_ALGORITHM = "HmacSHA256";
 
     public SecureDoubleShiftCypher(final NihilKey key) {
@@ -22,7 +26,13 @@ public class SecureDoubleShiftCypher extends NihilCypher {
     @Override
     public byte[] encrypt(final byte[] bytes) throws RuntimeException {
         final SecureRandom rnd = new SecureRandom();
-        final byte[] keyBytes = deriveKey(key.getBytes());
+        final byte[] result0;
+        try {
+            MessageDigest digest = MessageDigest.getInstance(SHA_ALGORITHM);
+            result0 = digest.digest(key.getBytes());
+        } catch (final Exception e) {
+            throw new RuntimeException("Failed to derive key", e);
+        }
         final byte[] salt = new byte[SALT_LENGTH];
         rnd.nextBytes(salt);
 
@@ -31,16 +41,22 @@ public class SecureDoubleShiftCypher extends NihilCypher {
 
         for (int i = 0, j = SALT_LENGTH; i < bytes.length; i++, j += 2) {
             final byte randShift = (byte) rnd.nextInt(256);
-            final byte keyShift = (byte) (i % keyBytes.length);
+            final byte keyShift = (byte) (i % result0.length);
             encrypted[j] = randShift;
-            encrypted[j + 1] = (byte) ((bytes[i] ^ randShift) ^ keyBytes[keyShift]);
+            encrypted[j + 1] = (byte) ((bytes[i] ^ randShift) ^ result0[keyShift]);
         }
 
-        // Add HMAC for integrity
-        byte[] hmac = generateHMAC(encrypted, keyBytes);
-        byte[] result = new byte[encrypted.length + HMAC_LENGTH];
+        final byte[] result1;
+        try {
+            final Mac mac = Mac.getInstance(HMAC_ALGORITHM);
+            mac.init(new SecretKeySpec(result0, HMAC_ALGORITHM));
+            result1 = mac.doFinal(encrypted);
+        } catch (final InvalidKeyException | NoSuchAlgorithmException e) {
+            throw new RuntimeException("Failed to generate HMAC", e);
+        }
+        final byte[] result = new byte[encrypted.length + HMAC_LENGTH];
         System.arraycopy(encrypted, 0, result, 0, encrypted.length);
-        System.arraycopy(hmac, 0, result, encrypted.length, HMAC_LENGTH);
+        System.arraycopy(result1, 0, result, encrypted.length, HMAC_LENGTH);
 
         return result;
     }
@@ -51,17 +67,30 @@ public class SecureDoubleShiftCypher extends NihilCypher {
             throw new IllegalArgumentException("Invalid encrypted data length");
         }
 
-        final byte[] keyBytes = deriveKey(key.getBytes());
+        final byte[] result0;
+        try {
+            result0 = MessageDigest.getInstance("SHA-256").digest(key.getBytes());
+        } catch (final NoSuchAlgorithmException e1) {
+            throw new RuntimeException("Failed to derive key", e1);
+        }
+
+        final byte[] keyBytes = result0;
         final byte[] hmac = Arrays.copyOfRange(encryptedData, encryptedData.length - HMAC_LENGTH, encryptedData.length);
         final byte[] dataWithoutHmac = Arrays.copyOfRange(encryptedData, 0, encryptedData.length - HMAC_LENGTH);
 
-        // Verify HMAC integrity
-        byte[] calculatedHmac = generateHMAC(dataWithoutHmac, keyBytes);
-        if (!MessageDigest.isEqual(hmac, calculatedHmac)) {
+        final byte[] result1;
+        try {
+            final Mac mac = Mac.getInstance(HMAC_ALGORITHM);
+            mac.init(new SecretKeySpec(keyBytes, HMAC_ALGORITHM));
+            result1 = mac.doFinal(dataWithoutHmac);
+        } catch (final InvalidKeyException | NoSuchAlgorithmException e) {
+            throw new RuntimeException("Failed to generate HMAC", e);
+        }
+
+        if (!MessageDigest.isEqual(hmac, result1)) {
             throw new SecurityException("Invalid HMAC, data integrity compromised");
         }
 
-        final byte[] salt = Arrays.copyOfRange(dataWithoutHmac, 0, SALT_LENGTH);
         final byte[] encrypted = Arrays.copyOfRange(dataWithoutHmac, SALT_LENGTH, dataWithoutHmac.length);
 
         final byte[] decrypted = new byte[encrypted.length / 2];
@@ -72,46 +101,7 @@ public class SecureDoubleShiftCypher extends NihilCypher {
             decrypted[i] = (byte) ((encryptedByte ^ randShift) ^ keyBytes[keyShift]);
         }
 
-        final ByteBuffer buffer = ByteBuffer.wrap(decrypted);
-
-        if (type == Integer.class) {
-            return type.cast(buffer.getInt());
-        } else if (type == Double.class) {
-            return type.cast(buffer.getDouble());
-        } else if (type == Short.class) {
-            return type.cast(buffer.getShort());
-        } else if (type == Byte.class) {
-            return type.cast(decrypted[0]);
-        } else if (type == Long.class) {
-            return type.cast(buffer.getLong());
-        } else if (type == Float.class) {
-            return type.cast(buffer.getFloat());
-        } else if (type == String.class) {
-            return type.cast(new String(decrypted));
-        } else if (type == byte[].class) {
-            return (T) decrypted;
-        } else {
-            throw new IllegalArgumentException("Unsupported type for decryption: " + type.getName());
-        }
+        return superCast(decrypted, type, ByteBuffer.wrap(decrypted));
     }
 
-    private byte[] deriveKey(final byte[] keyBytes) {
-        try {
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            return digest.digest(keyBytes);
-        } catch (Exception e) {
-            throw new RuntimeException("Failed to derive key", e);
-        }
-    }
-
-    private byte[] generateHMAC(byte[] data, byte[] key) {
-        try {
-            Mac mac = Mac.getInstance(HMAC_ALGORITHM);
-            SecretKeySpec keySpec = new SecretKeySpec(key, HMAC_ALGORITHM);
-            mac.init(keySpec);
-            return mac.doFinal(data);
-        } catch (Exception e) {
-            throw new RuntimeException("Failed to generate HMAC", e);
-        }
-    }
 }

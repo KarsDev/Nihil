@@ -36,25 +36,6 @@ public class ShiftCypher extends NihilCypher {
 
         }
 
-        final ByteBuffer buffer = ByteBuffer.wrap(decrypted);
-        if (type == Integer.class) {
-            return type.cast(buffer.getInt());
-        } else if (type == Double.class) {
-            return type.cast(buffer.getDouble());
-        } else if (type == Short.class) {
-            return type.cast(buffer.getShort());
-        } else if (type == Byte.class) {
-            return type.cast(decrypted[0]);
-        } else if (type == Long.class) {
-            return type.cast(buffer.getLong());
-        } else if (type == Float.class) {
-            return type.cast(buffer.getFloat());
-        } else if (type == String.class) {
-            return type.cast(new String(decrypted));
-        } else if (type == byte[].class) {
-            return (T) decrypted;
-        }  else {
-            throw new IllegalArgumentException("Unsupported type for decryption: " + type.getName());
-        }
+        return superCast(decrypted, type, ByteBuffer.wrap(decrypted));
     }
 }
